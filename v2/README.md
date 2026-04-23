@@ -1,6 +1,3 @@
-# 📘 README.md
-
-````md
 # 🚀 Bootstrap Script
 
 A production-ready bootstrap script to set up a fresh Ubuntu server for modern JavaScript development and deployment.
@@ -134,5 +131,4 @@ We can extend this further by:
 
 MIT
 
-```
 
