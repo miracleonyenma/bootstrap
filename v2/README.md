@@ -59,7 +59,7 @@ We automate everything needed to go from a fresh server → fully usable dev + d
 
 ```bash
 git clone https://github.com/miracleonyenma/bootstrap.git
-cd bootstrap
+cd bootstrap/v2
 chmod +x bootstrap.sh
 ./bootstrap.sh
 ````
