@@ -32,7 +32,11 @@ apt install -y \
 # 3. Set Zsh as default shell
 # ----------------------------
 echo "🐚 Setting Zsh as default shell..."
-chsh -s $(which zsh)
+if [ "$SHELL" != "$(which zsh)" ]; then
+  chsh -s $(which zsh)
+else
+  echo "Zsh is already the default shell, skipping..."
+fi
 
 # ----------------------------
 # 4. Install Oh My Zsh
@@ -41,7 +45,11 @@ echo "✨ Installing Oh My Zsh..."
 export RUNZSH=no
 export CHSH=no
 
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+if [ ! -d "$HOME/.oh-my-zsh" ]; then
+  sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+else
+  echo "Oh My Zsh already installed, skipping..."
+fi
 
 # ----------------------------
 # 5. Install Powerlevel10k
@@ -113,7 +121,11 @@ nvm alias default "lts/*"
 echo "⚡ Installing JS tooling..."
 
 npm install -g pnpm
-curl -fsSL https://bun.sh/install | bash
+if ! command -v bun &> /dev/null; then
+  curl -fsSL https://bun.sh/install | bash
+else
+  echo "Bun already installed, skipping..."
+fi
 
 npm install -g turbo nx pm2
 
@@ -123,15 +135,19 @@ npm install -g turbo nx pm2
 echo "🐳 Installing Docker..."
 
 install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
-  gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+if [ ! -f /etc/apt/keyrings/docker.gpg ]; then
+  curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
+    gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+fi
 
-echo \
-  "deb [arch=$(dpkg --print-architecture) \
+if [ ! -f /etc/apt/sources.list.d/docker.list ]; then
+  echo \
+    "deb [arch=$(dpkg --print-architecture) \
   signed-by=/etc/apt/keyrings/docker.gpg] \
   https://download.docker.com/linux/ubuntu \
   $(lsb_release -cs) stable" | \
-  tee /etc/apt/sources.list.d/docker.list > /dev/null
+    tee /etc/apt/sources.list.d/docker.list > /dev/null
+fi
 
 apt update -y
 apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
