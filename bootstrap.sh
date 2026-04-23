@@ -26,7 +26,11 @@ apt install -y \
 # 3. Set Zsh as default shell
 # ----------------------------
 echo "🐚 Setting Zsh as default shell..."
-chsh -s $(which zsh)
+if [ "$SHELL" != "$(which zsh)" ]; then
+  chsh -s $(which zsh)
+else
+  echo "Zsh is already the default shell, skipping..."
+fi
 
 # ----------------------------
 # 4. Install Oh My Zsh
@@ -35,7 +39,11 @@ echo "✨ Installing Oh My Zsh..."
 export RUNZSH=no
 export CHSH=no
 
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+if [ ! -d "$HOME/.oh-my-zsh" ]; then
+  sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+else
+  echo "Oh My Zsh already installed, skipping..."
+fi
 
 # ----------------------------
 # 5. Install Powerlevel10k
