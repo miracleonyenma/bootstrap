@@ -67,7 +67,7 @@ chmod +x bootstrap.sh
 ### Or run directly
 
 ```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/miracleonyenma/bootstrap/main/bootstrap.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/miracleonyenma/bootstrap/main/v2/bootstrap.sh)
 ```
 
 ---
