@@ -1,200 +1,256 @@
 #!/usr/bin/env bash
 
-set -e
+set -euo pipefail
 
-echo "🚀 Starting bootstrap..."
-
-# ----------------------------
-# 1. Update system
-# ----------------------------
-echo "📦 Updating system..."
-apt update -y && apt upgrade -y
+echo "🚀 Starting production bootstrap..."
 
 # ----------------------------
-# 2. Install base packages
+# Helpers
 # ----------------------------
-echo "🛠 Installing base packages..."
-apt install -y \
-  zsh \
-  git \
-  curl \
-  wget \
-  unzip \
-  build-essential \
-  ca-certificates \
-  gnupg \
-  lsb-release \
-  ufw \
-  fail2ban \
-  nginx
+log() { echo -e "\n👉 $1"; }
+ok() { echo "✅ $1"; }
+warn() { echo "⚠️ $1"; }
 
 # ----------------------------
-# 3. Set Zsh as default shell
+# 0. Preflight checks
 # ----------------------------
-echo "🐚 Setting Zsh as default shell..."
-if [ "$SHELL" != "$(which zsh)" ]; then
-  chsh -s $(which zsh)
+log "Running preflight checks..."
+
+if [ "$EUID" -ne 0 ]; then
+  warn "Please run as root (sudo)"
+  exit 1
+fi
+
+USER_HOME=$(eval echo ~${SUDO_USER:-$USER})
+TARGET_USER=${SUDO_USER:-$USER}
+
+ok "Running as root. Target user: $TARGET_USER"
+
+# ----------------------------
+# 1. System update
+# ----------------------------
+log "Updating system packages..."
+
+apt update -y
+apt upgrade -y
+
+ok "System updated"
+
+# ----------------------------
+# 2. Install base packages (idempotent)
+# ----------------------------
+log "Installing base packages..."
+
+PACKAGES=(
+  zsh git curl wget unzip build-essential
+  ca-certificates gnupg lsb-release
+  ufw fail2ban nginx
+)
+
+for pkg in "${PACKAGES[@]}"; do
+  if dpkg -s "$pkg" &>/dev/null; then
+    ok "$pkg already installed"
+  else
+    apt install -y "$pkg"
+  fi
+done
+
+# ----------------------------
+# 3. Zsh setup
+# ----------------------------
+log "Configuring Zsh..."
+
+if ! grep -q "$(which zsh)" /etc/shells; then
+  echo "$(which zsh)" >> /etc/shells
+fi
+
+if [ "$(getent passwd "$TARGET_USER" | cut -d: -f7)" != "$(which zsh)" ]; then
+  chsh -s "$(which zsh)" "$TARGET_USER"
+  ok "Zsh set as default shell"
 else
-  echo "Zsh is already the default shell, skipping..."
+  ok "Zsh already default"
 fi
 
 # ----------------------------
-# 4. Install Oh My Zsh
+# 4. Oh My Zsh (safe install)
 # ----------------------------
-echo "✨ Installing Oh My Zsh..."
-export RUNZSH=no
-export CHSH=no
+log "Installing Oh My Zsh..."
 
-if [ ! -d "$HOME/.oh-my-zsh" ]; then
-  sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"
+if [ ! -d "$USER_HOME/.oh-my-zsh" ]; then
+  sudo -u "$TARGET_USER" sh -c \
+    "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended
+  ok "Oh My Zsh installed"
 else
-  echo "Oh My Zsh already installed, skipping..."
+  ok "Oh My Zsh already installed"
 fi
 
 # ----------------------------
-# 5. Install Powerlevel10k
+# 5. Powerlevel10k + plugins
 # ----------------------------
-echo "🎨 Installing Powerlevel10k..."
+log "Installing Zsh plugins..."
 
-ZSH_CUSTOM=${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}
+ZSH_CUSTOM="$USER_HOME/.oh-my-zsh/custom"
 
-git clone --depth=1 https://github.com/romkatv/powerlevel10k.git \
-  $ZSH_CUSTOM/themes/powerlevel10k || true
+clone_if_missing () {
+  if [ ! -d "$2" ]; then
+    git clone --depth=1 "$1" "$2"
+    ok "Installed $(basename "$2")"
+  else
+    ok "$(basename "$2") already exists"
+  fi
+}
+
+clone_if_missing https://github.com/romkatv/powerlevel10k.git \
+  "$ZSH_CUSTOM/themes/powerlevel10k"
+
+clone_if_missing https://github.com/zsh-users/zsh-autosuggestions \
+  "$ZSH_CUSTOM/plugins/zsh-autosuggestions"
+
+clone_if_missing https://github.com/zsh-users/zsh-syntax-highlighting \
+  "$ZSH_CUSTOM/plugins/zsh-syntax-highlighting"
 
 # ----------------------------
-# 6. Install plugins
+# 6. Zsh config (non-destructive)
 # ----------------------------
-echo "🔌 Installing Zsh plugins..."
+log "Configuring .zshrc..."
 
-git clone https://github.com/zsh-users/zsh-autosuggestions \
-  $ZSH_CUSTOM/plugins/zsh-autosuggestions || true
+ZSHRC="$USER_HOME/.zshrc"
 
-git clone https://github.com/zsh-users/zsh-syntax-highlighting \
-  $ZSH_CUSTOM/plugins/zsh-syntax-highlighting || true
+if ! grep -q "powerlevel10k" "$ZSHRC" 2>/dev/null; then
+  cat <<'EOF' >> "$ZSHRC"
 
-# ----------------------------
-# 7. Configure .zshrc
-# ----------------------------
-echo "⚙️ Configuring Zsh..."
-
-cat > ~/.zshrc <<'EOF'
+# --- Custom Setup ---
 export ZSH="$HOME/.oh-my-zsh"
-
 ZSH_THEME="powerlevel10k/powerlevel10k"
 
-plugins=(
-  git
-  zsh-autosuggestions
-  zsh-syntax-highlighting
-)
+plugins=(git zsh-autosuggestions zsh-syntax-highlighting)
 
 source $ZSH/oh-my-zsh.sh
 
-# NVM
 export NVM_DIR="$HOME/.nvm"
 [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-[ -s "$NVM_DIR/bash_completion" ] && \. "$NVM_DIR/bash_completion"
 EOF
-
-# ----------------------------
-# 8. Install NVM
-# ----------------------------
-echo "🟢 Installing NVM..."
-
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
-
-export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-
-# ----------------------------
-# 9. Install Node LTS
-# ----------------------------
-echo "📦 Installing Node LTS..."
-
-nvm install --lts
-nvm use --lts
-nvm alias default "lts/*"
-
-# ----------------------------
-# 10. JS Tooling
-# ----------------------------
-echo "⚡ Installing JS tooling..."
-
-npm install -g pnpm
-if ! command -v bun &> /dev/null; then
-  curl -fsSL https://bun.sh/install | bash
+  ok ".zshrc updated"
 else
-  echo "Bun already installed, skipping..."
+  ok ".zshrc already configured"
 fi
 
-npm install -g turbo nx pm2
+# ----------------------------
+# 7. NVM + Node
+# ----------------------------
+log "Installing Node via NVM..."
+
+if [ ! -d "$USER_HOME/.nvm" ]; then
+  sudo -u "$TARGET_USER" bash -c \
+    "curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash"
+fi
+
+export NVM_DIR="$USER_HOME/.nvm"
+source "$NVM_DIR/nvm.sh"
+
+if ! command -v node &>/dev/null; then
+  nvm install --lts
+  nvm alias default "lts/*"
+  ok "Node installed"
+else
+  ok "Node already installed"
+fi
 
 # ----------------------------
-# 11. Install Docker
+# 8. Global JS tooling
 # ----------------------------
-echo "🐳 Installing Docker..."
+log "Installing JS tooling..."
 
-install -m 0755 -d /etc/apt/keyrings
-if [ ! -f /etc/apt/keyrings/docker.gpg ]; then
+npm install -g pnpm turbo nx pm2 || true
+
+if ! command -v bun &>/dev/null; then
+  curl -fsSL https://bun.sh/install | bash
+fi
+
+# ----------------------------
+# 9. Docker (idempotent)
+# ----------------------------
+log "Installing Docker..."
+
+if ! command -v docker &>/dev/null; then
+  install -m 0755 -d /etc/apt/keyrings
+
   curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
     gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-fi
 
-if [ ! -f /etc/apt/sources.list.d/docker.list ]; then
   echo \
     "deb [arch=$(dpkg --print-architecture) \
-  signed-by=/etc/apt/keyrings/docker.gpg] \
-  https://download.docker.com/linux/ubuntu \
-  $(lsb_release -cs) stable" | \
-    tee /etc/apt/sources.list.d/docker.list > /dev/null
+    signed-by=/etc/apt/keyrings/docker.gpg] \
+    https://download.docker.com/linux/ubuntu \
+    $(lsb_release -cs) stable" \
+    > /etc/apt/sources.list.d/docker.list
+
+  apt update -y
+  apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+
+  ok "Docker installed"
+else
+  ok "Docker already installed"
 fi
 
-apt update -y
-apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-
-usermod -aG docker $USER
+usermod -aG docker "$TARGET_USER"
 
 # ----------------------------
-# 12. Firewall (UFW)
+# 10. Firewall (safe)
 # ----------------------------
-echo "🔥 Configuring UFW..."
+log "Configuring UFW..."
 
 ufw allow OpenSSH
 ufw allow 'Nginx Full'
-ufw --force enable
+
+if ! ufw status | grep -q "Status: active"; then
+  ufw --force enable
+  ok "UFW enabled"
+else
+  ok "UFW already active"
+fi
 
 # ----------------------------
-# 13. Fail2Ban
+# 11. Fail2Ban
 # ----------------------------
-echo "🛡 Installing Fail2Ban..."
+log "Configuring Fail2Ban..."
 
 systemctl enable fail2ban
-systemctl start fail2ban
+systemctl restart fail2ban
 
 # ----------------------------
-# 14. SSH Hardening
+# 12. SSH Hardening (SAFE)
 # ----------------------------
-echo "🔐 Hardening SSH..."
+log "Hardening SSH..."
 
-sed -i 's/#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
-sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin no/' /etc/ssh/sshd_config
+SSH_CONFIG="/etc/ssh/sshd_config"
+cp "$SSH_CONFIG" "${SSH_CONFIG}.bak"
+
+sed -i 's/^#\?PermitRootLogin .*/PermitRootLogin no/' $SSH_CONFIG
+
+if [ -s "$USER_HOME/.ssh/authorized_keys" ]; then
+  warn "SSH key detected → disabling password auth"
+  sed -i 's/^#\?PasswordAuthentication .*/PasswordAuthentication no/' $SSH_CONFIG
+else
+  warn "No SSH key → keeping password auth ENABLED"
+  sed -i 's/^#\?PasswordAuthentication .*/PasswordAuthentication yes/' $SSH_CONFIG
+fi
 
 systemctl restart ssh
 
 # ----------------------------
-# 15. Nginx
+# 13. Nginx
 # ----------------------------
-echo "🌐 Setting up Nginx..."
+log "Ensuring Nginx is running..."
 
 systemctl enable nginx
-systemctl start nginx
+systemctl restart nginx
 
 # ----------------------------
-# 16. Done
+# Done
 # ----------------------------
-echo "✅ Bootstrap complete!"
-
 echo ""
+echo "🎉 Bootstrap complete!"
 echo "👉 Run: exec zsh"
 echo "👉 Then: p10k configure"
-echo "👉 Log out & back in for Docker permissions"
+echo "👉 Re-login for Docker permissions"
